@@ -1,1 +1,558 @@
+html_final = '''<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cierre Operativo SLS1 / ELSS1</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- PapaParse para lectura de CSV diario en el navegador -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <style>
+        body {
+            background-color: #0b0f19;
+            color: #f3f4f6;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        @keyframes pulse-verde {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+        }
+        .punto-en-vivo { animation: pulse-verde 2s infinite; }
+        @keyframes kpi-flash {
+            0% { background-color: rgba(234, 179, 8, 0.35); }
+            100% { background-color: rgba(17, 24, 39, 0.9); }
+        }
+        .flash-update { animation: kpi-flash 0.8s ease-out; }
+    </style>
+</head>
+<body class="p-4 md:p-6 min-h-screen flex flex-col justify-between">
 
+    <div>
+        <!-- ENCABEZADO Y FILTROS -->
+        <header class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 border-b border-gray-800 pb-4">
+            <div>
+                <div class="flex items-center gap-3">
+                    <span class="bg-yellow-500 text-black font-black px-2 py-0.5 text-xs rounded">SLS1 / ELSS1</span>
+                    <h1 class="text-xl font-bold tracking-tight text-white">CIERRE OPERATIVO & TRACKING INBOUND</h1>
+                </div>
+                <p class="text-xs text-gray-400 mt-1">TURNO AM1 &bull; CORTE 03/11/2026 &bull; DASHBOARD EN VIVO</p>
+            </div>
+            <div class="flex flex-wrap items-center gap-3 text-sm">
+                <span id="badge-sync-status" class="bg-emerald-950/50 text-emerald-400 border border-emerald-800/60 px-3 py-1 rounded-md text-xs font-medium transition-all">✓ Listo para iniciar</span>
+                <div class="bg-emerald-950/40 text-emerald-400 border border-emerald-500/30 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-2">
+                    <span class="w-2 h-2 rounded-full bg-emerald-500 punto-en-vivo"></span> EN VIVO
+                </div>
+                
+                <!-- BOTÓN DE AJUSTE MANUAL -->
+                <button onclick="abrirModalManual()" class="bg-blue-600 hover:bg-blue-500 active:scale-95 text-white font-bold px-3 py-1.5 rounded-md text-xs transition shadow flex items-center gap-1.5">
+                    ✏️ Ajuste Manual
+                </button>
+
+                <!-- BOTÓN DE CARGA DE CSV -->
+                <label class="cursor-pointer bg-yellow-500 hover:bg-yellow-400 text-black font-bold px-3 py-1.5 rounded-md text-xs transition shadow flex items-center gap-1.5">
+                    📂 Cargar CSV Inbound
+                    <input type="file" id="csvFileInput" accept=".csv" class="hidden" onchange="cargarArchivoDiario(event)">
+                </label>
+            </div>
+        </header>
+
+        <!-- BARRA DE FILTROS TEMPORALES -->
+        <div class="flex flex-wrap items-center justify-between gap-4 bg-gray-900/40 p-3 rounded-lg border border-gray-800 text-xs mb-6">
+            <div class="flex flex-wrap items-center gap-2">
+                <span class="text-gray-400">Archivos sincronizados:</span>
+                <span id="txt-nombre-archivo" class="bg-gray-800 text-gray-400 font-mono px-2 py-0.5 rounded text-[11px]">Esperando carga CSV...</span>
+                <span id="badge-cambios-manuales" class="hidden ml-2 bg-blue-950 text-blue-400 border border-blue-800/50 px-2 py-0.5 rounded text-[10px]">✏️ Datos ajustados manual</span>
+            </div>
+            <div class="text-gray-400 flex items-center gap-2">
+                <button onclick="restablecerDatos()" title="Borrar todo y empezar de cero" class="text-[11px] text-gray-400 hover:text-red-400 bg-gray-950 border border-gray-800 px-2.5 py-1 rounded transition mr-2">
+                    ↺ Limpiar Turno
+                </button>
+                <span>Fecha:</span>
+                <input type="date" id="fecha-dashboard" value="2026-11-03" class="bg-gray-950 border border-gray-800 text-white px-2 py-1 rounded focus:outline-none focus:border-yellow-500">
+            </div>
+        </div>
+
+        <!-- BLOQUE 1: MÉTRICAS LOGÍSTICAS -->
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+            <div class="bg-gray-900/60 p-3 rounded-lg border border-gray-800/80 transition-all duration-300 card-kpi">
+                <p class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Paquetería Procesada</p>
+                <p class="text-xl font-bold text-yellow-500 mt-1 cursor-pointer hover:text-yellow-300 transition" onclick="abrirModalYFoco('procesados')" id="kpi-procesados">0</p>
+                <p class="text-[9px] text-gray-500 mt-0.5">unidades totales</p>
+            </div>
+            <div class="bg-gray-900/60 p-3 rounded-lg border border-gray-800/80 transition-all duration-300 card-kpi">
+                <p class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Buffer Same Day</p>
+                <p class="text-xl font-bold text-emerald-500 mt-1 cursor-pointer hover:text-emerald-300 transition" onclick="abrirModalYFoco('buffer')" id="kpi-buffer">0</p>
+                <p class="text-[9px] text-gray-500 mt-0.5">en estación</p>
+            </div>
+            <div class="bg-gray-900/60 p-3 rounded-lg border border-gray-800/80 transition-all duration-300 card-kpi">
+                <p class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">On Way SD</p>
+                <p class="text-xl font-bold text-cyan-400 mt-1 cursor-pointer hover:text-cyan-300 transition" onclick="abrirModalYFoco('onWay')" id="kpi-onway">0</p>
+                <p class="text-[9px] text-gray-500 mt-0.5">camino a estación</p>
+            </div>
+            <div class="bg-gray-900/60 p-3 rounded-lg border border-gray-800/80 transition-all duration-300 card-kpi">
+                <p class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Re-inducción / Dev.</p>
+                <p class="text-xl font-bold text-indigo-400 mt-1 cursor-pointer hover:text-indigo-300 transition" onclick="abrirModalYFoco('devoluciones')" id="kpi-devoluciones">0</p>
+                <p class="text-[9px] text-gray-500 mt-0.5">devoluciones</p>
+            </div>
+            <div class="bg-gray-900/60 p-3 rounded-lg border border-gray-800/80 transition-all duration-300 card-kpi">
+                <p class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Estancados Estación</p>
+                <p class="text-xl font-bold text-fuchsia-400 mt-1 cursor-pointer hover:text-fuchsia-300 transition" onclick="abrirModalYFoco('estancadosEstacion')" id="kpi-est-estacion">0</p>
+                <p class="text-[9px] text-gray-500 mt-0.5">en estación</p>
+            </div>
+            <div class="bg-gray-900/60 p-3 rounded-lg border border-gray-800/80 transition-all duration-300 card-kpi">
+                <p class="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Estancados Camino</p>
+                <p class="text-xl font-bold text-orange-400 mt-1 cursor-pointer hover:text-orange-300 transition" onclick="abrirModalYFoco('estancadosCamino')" id="kpi-est-camino">0</p>
+                <p class="text-[9px] text-gray-500 mt-0.5">en camino</p>
+            </div>
+        </div>
+
+        <!-- BLOQUE 2: MÉTRICAS FINANCIERAS RESALTADAS -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div class="bg-gray-900/90 p-4 rounded-lg border-l-4 border-red-500 border-y border-r border-gray-800 flex justify-between items-center transition-all duration-300 card-kpi">
+                <div>
+                    <p class="text-xs uppercase font-bold text-gray-400 tracking-wider flex items-center gap-1">📦 Total Faltantes</p>
+                    <p class="text-2xl font-black text-white mt-1 cursor-pointer hover:text-gray-300" onclick="abrirModalYFoco(null, 'incidentes')" id="kpi-cant-faltantes">0</p>
+                </div>
+                <div class="text-right">
+                    <span class="text-[10px] font-mono text-gray-500">VALOR CLP</span>
+                    <p class="text-xl font-bold text-red-400" id="kpi-valor-faltantes">$0</p>
+                </div>
+            </div>
+
+            <div class="bg-gray-900/90 p-4 rounded-lg border-l-4 border-orange-500 border-y border-r border-gray-800 flex justify-between items-center transition-all duration-300 card-kpi">
+                <div>
+                    <p class="text-xs uppercase font-bold text-gray-400 tracking-wider flex items-center gap-1">⚠️ Total Dañados</p>
+                    <p class="text-2xl font-black text-white mt-1 cursor-pointer hover:text-gray-300" onclick="abrirModalYFoco(null, 'incidentes')" id="kpi-cant-danados">0</p>
+                </div>
+                <div class="text-right">
+                    <span class="text-[10px] font-mono text-gray-500">VALOR CLP</span>
+                    <p class="text-xl font-bold text-orange-400" id="kpi-valor-danados">$0</p>
+                </div>
+            </div>
+
+            <div class="bg-gray-900/90 p-4 rounded-lg border-l-4 border-yellow-500 border-y border-r border-gray-800 flex justify-between items-center transition-all duration-300 card-kpi">
+                <div>
+                    <p class="text-xs uppercase font-bold text-gray-400 tracking-wider">💰 Valor Total CLP</p>
+                    <p class="text-2xl font-black text-yellow-500 mt-2" id="kpi-valor-total">$0</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECCIÓN DE GRÁFICOS ANALÍTICOS -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+            <div class="bg-gray-900/40 p-4 rounded-lg border border-gray-800">
+                <h3 class="text-xs font-bold uppercase tracking-wider text-gray-400 mb-4">📈 Valor CLP Faltantes vs Dañados</h3>
+                <div class="relative h-64"><canvas id="chartVertical"></canvas></div>
+            </div>
+            <div class="bg-gray-900/40 p-4 rounded-lg border border-gray-800">
+                <h3 class="text-xs font-bold uppercase tracking-wider text-gray-400 mb-4">📊 Top Tipos de Daño (Cantidad)</h3>
+                <div class="relative h-64"><canvas id="chartHorizontal"></canvas></div>
+            </div>
+        </div>
+
+        <!-- TABLAS -->
+        <div class="space-y-6 mb-8">
+            <!-- TABLA FALTANTES -->
+            <div class="bg-gray-900/30 rounded-lg border border-gray-800 overflow-hidden">
+                <div class="bg-gray-900/80 px-4 py-3 border-b border-gray-800 flex justify-between items-center">
+                    <h2 class="text-xs font-bold uppercase tracking-wider text-red-400 flex items-center gap-2">
+                        ▶ Faltantes por Ruta <span class="bg-red-950 text-red-400 px-2 py-0.5 rounded text-[10px]" id="badge-count-faltantes">0 registros</span>
+                    </h2>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs text-gray-300">
+                        <thead class="bg-gray-950/80 text-[10px] uppercase text-gray-400 border-b border-gray-800">
+                            <tr>
+                                <th class="px-4 py-2.5 font-semibold text-center">Acción</th>
+                                <th class="px-4 py-2.5 font-semibold">Tracking ID</th>
+                                <th class="px-4 py-2.5 font-semibold">Ruta / Conductor</th>
+                                <th class="px-4 py-2.5 font-semibold">Comuna</th>
+                                <th class="px-4 py-2.5 font-semibold">Detalle Producto</th>
+                                <th class="px-4 py-2.5 font-semibold text-right">Valor CLP</th>
+                                <th class="px-4 py-2.5 font-semibold text-center">Estado</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tabla-faltantes-body" class="divide-y divide-gray-800/60 font-mono text-[11px]">
+                            <!-- Dinámico -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- TABLA DAÑADOS -->
+            <div class="bg-gray-900/30 rounded-lg border border-gray-800 overflow-hidden">
+                <div class="bg-gray-900/80 px-4 py-3 border-b border-gray-800 flex justify-between items-center">
+                    <h2 class="text-xs font-bold uppercase tracking-wider text-orange-400 flex items-center gap-2">
+                        ▶ Dañados por Ruta <span class="bg-orange-950 text-orange-400 px-2 py-0.5 rounded text-[10px]" id="badge-count-danados">0 registros</span>
+                    </h2>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs text-gray-300">
+                        <thead class="bg-gray-950/80 text-[10px] uppercase text-gray-400 border-b border-gray-800">
+                            <tr>
+                                <th class="px-4 py-2.5 font-semibold text-center">Acción</th>
+                                <th class="px-4 py-2.5 font-semibold">Tracking ID</th>
+                                <th class="px-4 py-2.5 font-semibold">Ruta / DSP</th>
+                                <th class="px-4 py-2.5 font-semibold">Tipo de Daño</th>
+                                <th class="px-4 py-2.5 font-semibold">Detalle Producto</th>
+                                <th class="px-4 py-2.5 font-semibold text-right">Valor CLP</th>
+                                <th class="px-4 py-2.5 font-semibold text-center">Disposición</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tabla-danados-body" class="divide-y divide-gray-800/60 font-mono text-[11px]">
+                            <!-- Dinámico -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL DE ACTUALIZACIÓN MANUAL -->
+    <div id="modalManual" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-gray-900 border border-gray-700 rounded-xl max-w-2xl w-full shadow-2xl relative flex flex-col max-h-[90vh]">
+            <button onclick="cerrarModalManual()" class="absolute top-4 right-4 text-gray-400 hover:text-white text-lg font-bold">&times;</button>
+            
+            <div class="p-5 border-b border-gray-800 flex items-center gap-2">
+                <span class="bg-blue-600/30 text-blue-400 p-2 rounded-lg text-lg">✏️</span>
+                <div>
+                    <h3 class="text-sm font-bold text-white uppercase tracking-wider">Ajuste Manual del Turno</h3>
+                    <p class="text-[11px] text-gray-400">Modifica los KPIs logísticos o reporta un nuevo incidente.</p>
+                </div>
+            </div>
+
+            <div class="flex border-b border-gray-800 px-5 pt-3 gap-4 text-xs font-bold">
+                <button id="tabKpiBtn" onclick="cambiarTab('kpi')" class="pb-2 border-b-2 border-yellow-400 text-yellow-400">📦 KPIs Logísticos</button>
+                <button id="tabIncBtn" onclick="cambiarTab('inc')" class="pb-2 border-b-2 border-transparent text-gray-400 hover:text-white">⚠️ Nuevo Incidente</button>
+            </div>
+
+            <div class="p-5 overflow-y-auto">
+                <!-- TAB 1: KPIs -->
+                <div id="tabKpiContent" class="grid grid-cols-2 gap-4 text-xs">
+                    <div><label class="block text-gray-400 mb-1">Paquetería Procesada:</label><input type="number" id="mod-procesados" class="w-full bg-gray-950 border border-gray-700 rounded p-2 text-white font-bold"></div>
+                    <div><label class="block text-gray-400 mb-1">Buffer Same Day:</label><input type="number" id="mod-buffer" class="w-full bg-gray-950 border border-gray-700 rounded p-2 text-white font-bold"></div>
+                    <div><label class="block text-gray-400 mb-1">On Way SD:</label><input type="number" id="mod-onWay" class="w-full bg-gray-950 border border-gray-700 rounded p-2 text-white font-bold"></div>
+                    <div><label class="block text-gray-400 mb-1">Devoluciones:</label><input type="number" id="mod-devoluciones" class="w-full bg-gray-950 border border-gray-700 rounded p-2 text-white font-bold"></div>
+                    <div><label class="block text-gray-400 mb-1">Estancados Estación:</label><input type="number" id="mod-estancadosEstacion" class="w-full bg-gray-950 border border-gray-700 rounded p-2 text-white font-bold"></div>
+                    <div><label class="block text-gray-400 mb-1">Estancados Camino:</label><input type="number" id="mod-estancadosCamino" class="w-full bg-gray-950 border border-gray-700 rounded p-2 text-white font-bold"></div>
+                </div>
+
+                <!-- TAB 2: INCIDENTES -->
+                <div id="tabIncContent" class="hidden space-y-4 text-xs">
+                    <div class="flex gap-4 mb-4">
+                        <label class="flex items-center gap-2 text-gray-300"><input type="radio" name="tipoInc" value="faltante" checked onchange="toggleTipoIncidente()"> Faltante</label>
+                        <label class="flex items-center gap-2 text-gray-300"><input type="radio" name="tipoInc" value="danado" onchange="toggleTipoIncidente()"> Dañado</label>
+                    </div>
+                    
+                    <div class="grid grid-cols-2 gap-3">
+                        <div><label class="block text-gray-400 mb-1">Tracking ID:</label><input type="text" id="inc-tracking" placeholder="MLC-..." class="w-full bg-gray-950 border border-gray-700 rounded p-2 text-white"></div>
+                        <div><label class="block text-gray-400 mb-1">Ruta / Conductor:</label><input type="text" id="inc-ruta" placeholder="Ej: SD-STGO-22" class="w-full bg-gray-950 border border-gray-700 rounded p-2 text-white"></div>
+                        <div id="div-comuna"><label class="block text-gray-400 mb-1">Comuna (Faltante):</label><input type="text" id="inc-comuna" class="w-full bg-gray-950 border border-gray-700 rounded p-2 text-white"></div>
+                        <div id="div-tipoDano" class="hidden"><label class="block text-gray-400 mb-1">Tipo de Daño:</label>
+                            <select id="inc-tipoDano" class="w-full bg-gray-950 border border-gray-700 rounded p-2 text-white">
+                                <option value="Embalaje Roto">Embalaje Roto</option><option value="Aplastamiento">Aplastamiento</option>
+                                <option value="Derrame Líquido">Derrame Líquido</option><option value="Sello Vulnerado">Sello Vulnerado</option>
+                            </select>
+                        </div>
+                        <div class="col-span-2"><label class="block text-gray-400 mb-1">Detalle Producto:</label><input type="text" id="inc-producto" class="w-full bg-gray-950 border border-gray-700 rounded p-2 text-white"></div>
+                        <div><label class="block text-gray-400 mb-1">Valor CLP:</label><input type="number" id="inc-valor" class="w-full bg-gray-950 border border-gray-700 rounded p-2 text-white"></div>
+                        <div id="div-estadoFaltante"><label class="block text-gray-400 mb-1">Estado:</label><input type="text" id="inc-estado" value="No cargado" class="w-full bg-gray-950 border border-gray-700 rounded p-2 text-white"></div>
+                        <div id="div-dispDanado" class="hidden"><label class="block text-gray-400 mb-1">Disposición:</label>
+                            <select id="inc-disposicion" class="w-full bg-gray-950 border border-gray-700 rounded p-2 text-white">
+                                <option value="Cuarentena">Cuarentena</option><option value="Baja Inmediata">Baja Inmediata</option><option value="Re-embalaje">Re-embalaje</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="p-5 border-t border-gray-800 flex justify-end gap-2 text-xs">
+                <button onclick="cerrarModalManual()" class="px-4 py-1.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300">Cancelar</button>
+                <button onclick="guardarAjustes()" class="px-5 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-bold">Guardar Cambios</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ESTADO ORIGINAL LIMPIO PARA INICIAR EL DÍA
+        const estadoOriginal = {
+            kpis: { procesados: 0, buffer: 0, onWay: 0, devoluciones: 0, estancadosEstacion: 0, estancadosCamino: 0 },
+            faltantes: [],
+            danados: []
+        };
+
+        // Reseteamos el localStorage para empezar de cero
+        let baseTotalTurno = 0;
+        let estadoActual = JSON.parse(localStorage.getItem('sls1_elss1_cierre_limpio')) || JSON.parse(JSON.stringify(estadoOriginal));
+        
+        // Auto-set fecha actual
+        document.getElementById('fecha-dashboard').value = new Date().toISOString().split('T')[0];
+
+        let chartV = null; let chartH = null;
+        let tabActual = 'kpi';
+
+        document.addEventListener('DOMContentLoaded', () => {
+            renderTodo();
+            verificarCambios();
+        });
+
+        function renderTodo() {
+            document.getElementById('kpi-procesados').innerText = estadoActual.kpis.procesados.toLocaleString('es-CL');
+            document.getElementById('kpi-buffer').innerText = estadoActual.kpis.buffer.toLocaleString('es-CL');
+            document.getElementById('kpi-onway').innerText = estadoActual.kpis.onWay.toLocaleString('es-CL');
+            document.getElementById('kpi-devoluciones').innerText = estadoActual.kpis.devoluciones.toLocaleString('es-CL');
+            document.getElementById('kpi-est-estacion').innerText = estadoActual.kpis.estancadosEstacion.toLocaleString('es-CL');
+            document.getElementById('kpi-est-camino').innerText = estadoActual.kpis.estancadosCamino.toLocaleString('es-CL');
+
+            const totalFalt = estadoActual.faltantes.reduce((sum, el) => sum + el.valor, 0);
+            const totalDan = estadoActual.danados.reduce((sum, el) => sum + el.valor, 0);
+            
+            document.getElementById('kpi-cant-faltantes').innerText = estadoActual.faltantes.length;
+            document.getElementById('kpi-valor-faltantes').innerText = `$${totalFalt.toLocaleString('es-CL')}`;
+            
+            document.getElementById('kpi-cant-danados').innerText = estadoActual.danados.length;
+            document.getElementById('kpi-valor-danados').innerText = `$${totalDan.toLocaleString('es-CL')}`;
+            
+            document.getElementById('kpi-valor-total').innerText = `$${(totalFalt + totalDan).toLocaleString('es-CL')}`;
+
+            renderTablas();
+            renderGraficos(totalFalt, totalDan);
+        }
+
+        function renderTablas() {
+            const tbFalt = document.getElementById('tabla-faltantes-body');
+            document.getElementById('badge-count-faltantes').innerText = `${estadoActual.faltantes.length} registros`;
+            tbFalt.innerHTML = '';
+            
+            if(estadoActual.faltantes.length === 0) {
+                tbFalt.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-gray-500">No hay paquetes faltantes registrados hoy.</td></tr>';
+            } else {
+                estadoActual.faltantes.forEach((f, i) => {
+                    tbFalt.innerHTML += `<tr class="hover:bg-gray-800/30 transition">
+                        <td class="px-4 py-2 text-center"><button onclick="eliminarFaltante(${i})" class="text-red-400 hover:text-white px-2 rounded bg-gray-900 border border-red-900">🗑️</button></td>
+                        <td class="px-4 py-2 text-red-400 font-bold">${f.id}</td><td class="px-4 py-2 font-sans">${f.ruta}</td>
+                        <td class="px-4 py-2 font-sans">${f.comuna}</td><td class="px-4 py-2 font-sans">${f.producto}</td>
+                        <td class="px-4 py-2 text-right font-bold text-white">$${f.valor.toLocaleString('es-CL')}</td>
+                        <td class="px-4 py-2 text-center"><span class="bg-red-950/60 text-red-400 px-2 py-0.5 rounded text-[10px] border border-red-800/50">${f.estado}</span></td>
+                    </tr>`;
+                });
+            }
+
+            const tbDan = document.getElementById('tabla-danados-body');
+            document.getElementById('badge-count-danados').innerText = `${estadoActual.danados.length} registros`;
+            tbDan.innerHTML = '';
+            
+            if(estadoActual.danados.length === 0) {
+                tbDan.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-gray-500">No hay paquetes dañados registrados hoy.</td></tr>';
+            } else {
+                estadoActual.danados.forEach((d, i) => {
+                    tbDan.innerHTML += `<tr class="hover:bg-gray-800/30 transition">
+                        <td class="px-4 py-2 text-center"><button onclick="eliminarDanado(${i})" class="text-orange-400 hover:text-white px-2 rounded bg-gray-900 border border-orange-900">🗑️</button></td>
+                        <td class="px-4 py-2 text-orange-400 font-bold">${d.id}</td><td class="px-4 py-2 font-sans">${d.ruta}</td>
+                        <td class="px-4 py-2 font-sans"><span class="text-orange-300">${d.tipo}</span></td><td class="px-4 py-2 font-sans">${d.producto}</td>
+                        <td class="px-4 py-2 text-right font-bold text-white">$${d.valor.toLocaleString('es-CL')}</td>
+                        <td class="px-4 py-2 text-center"><span class="bg-gray-800 text-gray-300 px-2 py-0.5 rounded text-[10px]">${d.disposicion}</span></td>
+                    </tr>`;
+                });
+            }
+        }
+
+        function renderGraficos(valFalt, valDan) {
+            if (chartV) chartV.destroy();
+            chartV = new Chart(document.getElementById('chartVertical').getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels: ['Faltantes', 'Dañados'],
+                    datasets: [{ data: [valFalt, valDan], backgroundColor: ['#ef4444', '#f97316'], borderRadius: 6 }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+                           scales: { y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9ca3af', callback: val => '$'+(val/1000)+'k' } }, x: { grid: { display: false }, ticks: { color: '#9ca3af' } } } }
+            });
+
+            const tipos = {};
+            estadoActual.danados.forEach(d => tipos[d.tipo] = (tipos[d.tipo] || 0) + 1);
+            
+            if (chartH) chartH.destroy();
+            chartH = new Chart(document.getElementById('chartHorizontal').getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels: Object.keys(tipos).length ? Object.keys(tipos) : ['Sin Datos'],
+                    datasets: [{ data: Object.values(tipos).length ? Object.values(tipos) : [0], backgroundColor: '#eab308', borderRadius: 6 }]
+                },
+                options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+                           scales: { x: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9ca3af', stepSize: 1 } }, y: { grid: { display: false }, ticks: { color: '#9ca3af' } } } }
+            });
+        }
+
+        // ======================= MANEJO DE ARCHIVOS INBOUND AUTOMÁTICO =======================
+        function cargarArchivoDiario(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            document.getElementById('txt-nombre-archivo').innerText = file.name;
+            document.getElementById('txt-nombre-archivo').classList.add('text-yellow-400');
+            document.getElementById('txt-nombre-archivo').classList.remove('text-gray-400');
+
+            Papa.parse(file, {
+                header: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    if (results.data && results.data.length > 0) {
+                        const data = results.data;
+                        
+                        // Validamos si es el reporte de "Tracking/Inbound"
+                        if (data[0]['ID de Paquete'] !== undefined && data[0]['Ubicación del paquete'] !== undefined) {
+                            
+                            let bufferCount = 0;
+                            let onWayCount = 0;
+
+                            data.forEach(row => {
+                                const ubi = row['Ubicación del paquete'];
+                                if (ubi === 'En la estación') bufferCount++;
+                                else if (ubi === 'Camino a la estación') onWayCount++;
+                            });
+                            
+                            const totalEnReporte = data.length;
+                            
+                            // Si el archivo es mayor a la base (primer escaneo del dia), guardamos como base.
+                            if (baseTotalTurno === 0 || totalEnReporte > baseTotalTurno) {
+                                baseTotalTurno = totalEnReporte;
+                            }
+                            
+                            const procesadosCalc = baseTotalTurno - totalEnReporte;
+
+                            estadoActual.kpis.buffer = bufferCount;
+                            estadoActual.kpis.onWay = onWayCount;
+                            estadoActual.kpis.procesados = procesadosCalc > 0 ? procesadosCalc : 0;
+                            
+                            guardarYRefrescar();
+                            
+                            // Animación de éxito
+                            const badge = document.getElementById('badge-sync-status');
+                            badge.innerText = `✓ Sincronizado: ${file.name}`;
+                            badge.classList.remove('text-emerald-400');
+                            badge.classList.add('text-yellow-400', 'flash-update');
+                            setTimeout(() => { 
+                                badge.classList.remove('flash-update', 'text-yellow-400');
+                                badge.classList.add('text-emerald-400');
+                            }, 1500);
+                        } else {
+                            alert("Formato no reconocido. Asegúrate de subir un archivo Inbound con 'Ubicación del paquete'.");
+                        }
+                    }
+                }
+            });
+        }
+
+        // ======================= MODAL MANUAL =======================
+        function abrirModalManual() {
+            document.getElementById('mod-procesados').value = estadoActual.kpis.procesados;
+            document.getElementById('mod-buffer').value = estadoActual.kpis.buffer;
+            document.getElementById('mod-onWay').value = estadoActual.kpis.onWay;
+            document.getElementById('mod-devoluciones').value = estadoActual.kpis.devoluciones;
+            document.getElementById('mod-estancadosEstacion').value = estadoActual.kpis.estancadosEstacion;
+            document.getElementById('mod-estancadosCamino').value = estadoActual.kpis.estancadosCamino;
+            document.getElementById('modalManual').classList.remove('hidden');
+        }
+
+        function abrirModalYFoco(idFoco, tab = 'kpi') {
+            cambiarTab(tab);
+            abrirModalManual();
+            if(idFoco) setTimeout(() => document.getElementById(`mod-${idFoco}`).focus(), 100);
+        }
+
+        function cerrarModalManual() { document.getElementById('modalManual').classList.add('hidden'); }
+
+        function cambiarTab(tab) {
+            tabActual = tab;
+            const btnK = document.getElementById('tabKpiBtn'); const btnI = document.getElementById('tabIncBtn');
+            const contK = document.getElementById('tabKpiContent'); const contI = document.getElementById('tabIncContent');
+            if (tab === 'kpi') {
+                btnK.className = 'pb-2 border-b-2 border-yellow-400 text-yellow-400';
+                btnI.className = 'pb-2 border-b-2 border-transparent text-gray-400 hover:text-white';
+                contK.classList.remove('hidden'); contI.classList.add('hidden');
+            } else {
+                btnI.className = 'pb-2 border-b-2 border-yellow-400 text-yellow-400';
+                btnK.className = 'pb-2 border-b-2 border-transparent text-gray-400 hover:text-white';
+                contI.classList.remove('hidden'); contK.classList.add('hidden');
+            }
+        }
+
+        function toggleTipoIncidente() {
+            const isDanado = document.querySelector('input[name="tipoInc"]:checked').value === 'danado';
+            document.getElementById('div-comuna').classList.toggle('hidden', isDanado);
+            document.getElementById('div-estadoFaltante').classList.toggle('hidden', isDanado);
+            document.getElementById('div-tipoDano').classList.toggle('hidden', !isDanado);
+            document.getElementById('div-dispDanado').classList.toggle('hidden', !isDanado);
+        }
+
+        function guardarAjustes() {
+            if (tabActual === 'kpi') {
+                estadoActual.kpis.procesados = parseInt(document.getElementById('mod-procesados').value) || 0;
+                estadoActual.kpis.buffer = parseInt(document.getElementById('mod-buffer').value) || 0;
+                estadoActual.kpis.onWay = parseInt(document.getElementById('mod-onWay').value) || 0;
+                estadoActual.kpis.devoluciones = parseInt(document.getElementById('mod-devoluciones').value) || 0;
+                estadoActual.kpis.estancadosEstacion = parseInt(document.getElementById('mod-estancadosEstacion').value) || 0;
+                estadoActual.kpis.estancadosCamino = parseInt(document.getElementById('mod-estancadosCamino').value) || 0;
+            } else {
+                const tipo = document.querySelector('input[name="tipoInc"]:checked').value;
+                const id = document.getElementById('inc-tracking').value || `MLC-M${Date.now().toString().slice(-6)}`;
+                const ruta = document.getElementById('inc-ruta').value || 'S/R';
+                const prod = document.getElementById('inc-producto').value || 'Producto S/D';
+                const val = parseInt(document.getElementById('inc-valor').value) || 0;
+                
+                if (tipo === 'faltante') {
+                    estadoActual.faltantes.push({ id: id, ruta: ruta, producto: prod, valor: val, comuna: document.getElementById('inc-comuna').value || '-', estado: document.getElementById('inc-estado').value });
+                } else {
+                    estadoActual.danados.push({ id: id, ruta: ruta, producto: prod, valor: val, tipo: document.getElementById('inc-tipoDano').value, disposicion: document.getElementById('inc-disposicion').value });
+                }
+                
+                // Clear form
+                document.getElementById('inc-tracking').value = '';
+                document.getElementById('inc-producto').value = '';
+                document.getElementById('inc-valor').value = '';
+            }
+
+            guardarYRefrescar();
+            cerrarModalManual();
+        }
+
+        function eliminarFaltante(index) {
+            if(confirm('¿Eliminar este registro faltante?')) { estadoActual.faltantes.splice(index, 1); guardarYRefrescar(); }
+        }
+        function eliminarDanado(index) {
+            if(confirm('¿Eliminar este registro dañado?')) { estadoActual.danados.splice(index, 1); guardarYRefrescar(); }
+        }
+
+        function guardarYRefrescar() {
+            localStorage.setItem('sls1_elss1_cierre_limpio', JSON.stringify(estadoActual));
+            verificarCambios();
+            renderTodo();
+            document.querySelectorAll('.card-kpi').forEach(el => {
+                el.classList.remove('flash-update'); void el.offsetWidth; el.classList.add('flash-update');
+            });
+        }
+
+        function verificarCambios() {
+            const modificado = localStorage.getItem('sls1_elss1_cierre_limpio');
+            document.getElementById('badge-cambios-manuales').classList.toggle('hidden', !modificado);
+        }
+
+        function restablecerDatos() {
+            if (confirm('¿Limpiar todo el dashboard y empezar el turno de cero?')) {
+                localStorage.removeItem('sls1_elss1_cierre_limpio');
+                estadoActual = JSON.parse(JSON.stringify(estadoOriginal));
+                baseTotalTurno = 0;
+                document.getElementById('txt-nombre-archivo').innerText = "Esperando carga CSV...";
+                document.getElementById('txt-nombre-archivo').classList.add('text-gray-400');
+                document.getElementById('txt-nombre-archivo').classList.remove('text-yellow-400');
+                guardarYRefrescar();
+            }
+        }
+    </script>
+</body>
+</html>
